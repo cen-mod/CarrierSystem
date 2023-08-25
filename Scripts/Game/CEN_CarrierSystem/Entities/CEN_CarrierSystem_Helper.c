@@ -16,24 +16,24 @@ class CEN_CarrierSystem_Helper : GenericEntity
 	
 	static void Carry(IEntity carrier, IEntity carried)
 	{
+		if (!carrier || !carried)
+			return;
+		
 		CEN_CarrierSystem_Helper helper = CEN_CarrierSystem_Helper.Cast(GetGame().SpawnEntityPrefab(Resource.Load(HELPER_PREFAB_NAME), null, EntitySpawnParams()));
 		helper.m_eCarrier = carrier;
 		helper.m_eCarried = carried;
-						
-		carrier.AddChild(helper, carrier.GetBoneIndex("Spine5"));
-		
-		SCR_CompartmentAccessComponent compartmentAccessComponent = SCR_CompartmentAccessComponent.Cast(carried.FindComponent(SCR_CompartmentAccessComponent));
-		if (!compartmentAccessComponent)
-			return;
 		
 		PlayerManager playerManager = GetGame().GetPlayerManager();
 		SCR_PlayerController carrierCtrl = SCR_PlayerController.Cast(playerManager.GetPlayerController(playerManager.GetPlayerIdFromControlledEntity(carrier)));
 		RplComponent helperRpl = RplComponent.Cast(helper.FindComponent(RplComponent));
 		RplId carrierCtrlId = carrierCtrl.GetRplIdentity();
 		helperRpl.Give(carrierCtrlId);
+						
+		carrier.AddChild(helper, carrier.GetBoneIndex("Spine5"));
 
 		RplId carriedId = RplComponent.Cast(carried.FindComponent(RplComponent)).Id();
 		helper.Rpc(helper.RpcDo_Owner_Carry, carriedId);
+		SCR_CompartmentAccessComponent compartmentAccessComponent = SCR_CompartmentAccessComponent.Cast(carried.FindComponent(SCR_CompartmentAccessComponent));
 		compartmentAccessComponent.MoveInVehicle(helper, ECompartmentType.Cargo);
 	}
 
@@ -82,18 +82,23 @@ class CEN_CarrierSystem_Helper : GenericEntity
 	
 	void Release()
 	{
-		SCR_CompartmentAccessComponent compartmentAccessComponent = SCR_CompartmentAccessComponent.Cast(m_eCarried.FindComponent(SCR_CompartmentAccessComponent));
-		if (!compartmentAccessComponent)
+		if (m_bMarkedForDeletion)
 			return;
 		
-		vector target_pos;
-		vector target_transform[4];
-		m_eCarrier.GetTransform(target_transform);
-		SCR_WorldTools.FindEmptyTerrainPosition(target_pos, target_transform[3] + target_transform[2], SEARCH_POS_RADIUS);
-		target_transform[3] = target_pos;
-		compartmentAccessComponent.MoveOutVehicle(-1, target_transform);		
+		RplId carriedId = Replication.INVALID_ID;
+		if (m_eCarried)
+		{
+			carriedId = RplComponent.Cast(m_eCarried.FindComponent(RplComponent)).Id();
+			
+			SCR_CompartmentAccessComponent compartmentAccessComponent = SCR_CompartmentAccessComponent.Cast(m_eCarried.FindComponent(SCR_CompartmentAccessComponent));
+			vector target_pos;
+			vector target_transform[4];
+			m_eCarrier.GetTransform(target_transform);
+			SCR_WorldTools.FindEmptyTerrainPosition(target_pos, target_transform[3] + target_transform[2], SEARCH_POS_RADIUS);
+			target_transform[3] = target_pos;
+			compartmentAccessComponent.MoveOutVehicle(-1, target_transform);
+		};
 		
-		RplId carriedId = RplComponent.Cast(m_eCarried.FindComponent(RplComponent)).Id();
 		Rpc(RpcDo_Owner_Release, carriedId);
 		m_eCarrier = null;
 		m_eCarried = null;
@@ -106,8 +111,14 @@ class CEN_CarrierSystem_Helper : GenericEntity
 	protected void RpcDo_Owner_Release(RplId carriedId)
 	{
 		GetGame().GetInputManager().RemoveActionListener("CEN_CarrierSystem_Release", EActionTrigger.DOWN, ActionReleaseCallback);
-		IEntity carried = RplComponent.Cast(Replication.FindItem(carriedId)).GetEntity();
-		carried.GetPhysics().SetInteractionLayer(m_iPhysicsLayerPreset);
+		
+		RplComponent carriedRpl = RplComponent.Cast(Replication.FindItem(carriedId));
+		if (carriedRpl)
+		{
+			IEntity carried = carriedRpl.GetEntity();
+			carried.GetPhysics().SetInteractionLayer(m_iPhysicsLayerPreset);
+		};
+
 		GetGame().GetCallqueue().Remove(PreventProneCarrier);
 	}
 	
