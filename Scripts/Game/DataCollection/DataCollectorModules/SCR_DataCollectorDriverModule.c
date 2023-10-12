@@ -179,93 +179,85 @@ TODO: REMOVE THIS, REPLACE WITH SENDING THROUGH RPL THE STATS FROM THE SERVER RE
 	}
 
 	//------------------------------------------------------------------------------------------------
-	override void OnPlayerKilled(int playerID, IEntity player, IEntity killer)
+	override void OnPlayerKilled(int playerId, IEntity playerEntity, IEntity killerEntity, notnull Instigator killer)
 	{
 		//We are only looking for roadkills here. That's why we don't call super.OnPlayerKilled. This behaviour is very specific
-
-		//if there's a null or the player killed themselves by using the respawn feature, do nothing
-		if (!player || !killer || (player == killer))
-			return;
-
-		int killerID = GetGame().GetPlayerManager().GetPlayerIdFromControlledEntity(killer);
-
+		
 		//If the killer is AI count no roadKill
-		if (killerID == 0)
+		if (killer.GetInstigatorType() != InstigatorType.INSTIGATOR_PLAYER)
 			return;
 
-		SCR_DataCollectorDriverModuleContext killerContext = m_mTrackedPlayersInVehicles.Get(killerID);
+		//if the player killed themselves do nothing
+		int killerId = killer.GetInstigatorPlayerID();
+		if (killerId == playerId)
+			return;
+		
+		SCR_ChimeraCharacter playerEntityChar = SCR_ChimeraCharacter.Cast(playerEntity);
+		if (!playerEntityChar)
+			return;
+		
+		SCR_FactionManager factionManager = SCR_FactionManager.Cast(GetGame().GetFactionManager());
+		if (!factionManager)
+			return;
+		
+		Faction factionKiller = Faction.Cast(factionManager.GetPlayerFaction(killerId));
+		if (!factionKiller)
+			return;
+
+		SCR_DataCollectorDriverModuleContext killerContext = m_mTrackedPlayersInVehicles.Get(killerId);
 		//If the killer is not tracked as a driver, then this was no roadkill
 		if (!killerContext || !killerContext.m_bPilot)
 			return;
 
 		//Now we know the killer is not an AI and they are a driver. Add roadkill!
 
-		SCR_PlayerData killerData = GetGame().GetDataCollector().GetPlayerData(killerID);
-
-		FactionAffiliationComponent victimAffiliation = FactionAffiliationComponent.Cast(player.FindComponent(FactionAffiliationComponent));
-		if (!victimAffiliation)
-			return;
-
-		FactionAffiliationComponent killerAffiliation = FactionAffiliationComponent.Cast(killer.FindComponent(FactionAffiliationComponent));
-		if (!killerAffiliation)
-			return;
-
-		Faction victimFaction = victimAffiliation.GetAffiliatedFaction();
-		Faction killerFaction = killerAffiliation.GetAffiliatedFaction();
+		SCR_PlayerData killerData = GetGame().GetDataCollector().GetPlayerData(killerId);
 
 		//Add a kill. Find if friendly or unfriendly
-		if (killerFaction && victimFaction)
-		{
-			if (killerFaction.IsFactionFriendly(victimFaction))
-				killerData.AddStat(SCR_EDataStats.FRIENDLY_ROADKILLS);
-			else
-				killerData.AddStat(SCR_EDataStats.ROADKILLS);
-		}
+		if (factionKiller.IsFactionFriendly(playerEntityChar.GetFaction()))
+			killerData.AddStat(SCR_EDataStats.FRIENDLY_ROADKILLS);
+		else
+			killerData.AddStat(SCR_EDataStats.ROADKILLS);
 	}
 
 	//------------------------------------------------------------------------------------------------
-	override void OnAIKilled(IEntity AI, IEntity killer)
+	override void OnAIKilled(IEntity AIEntity, IEntity killerEntity, notnull Instigator killer)
 	{
 		//We are only looking for roadkills here. That's why we don't call super.OnAIKilled. This behaviour is very specific
 
 		//This code has many similarities with OnPlayerKilled.
 		//It would be nice to have only one method for OnCharacterKilled instead of having this duplicity
-
-		if (!AI || !killer)
+		
+		if (killer.GetInstigatorType() != InstigatorType.INSTIGATOR_PLAYER)
 			return;
 
-		int killerID = GetGame().GetPlayerManager().GetPlayerIdFromControlledEntity(killer);
-
-		if (killerID == 0)
+		int killerId = killer.GetInstigatorPlayerID();
+		
+		SCR_ChimeraCharacter AIEntityChar = SCR_ChimeraCharacter.Cast(AIEntity);
+		if (!AIEntityChar)
 			return;
 
-		SCR_DataCollectorDriverModuleContext killerContext = m_mTrackedPlayersInVehicles.Get(killerID);
+		SCR_DataCollectorDriverModuleContext killerContext = m_mTrackedPlayersInVehicles.Get(killerId);
 		//If the killer is not tracked as a driver, then this was no roadkill
 		if (!killerContext || !killerContext.m_bPilot)
 			return;
 
 		//Now we know the killer is not an AI and they are a driver. Add roadkill!
-		SCR_PlayerData killerData = GetGame().GetDataCollector().GetPlayerData(killerID);
+		SCR_PlayerData killerData = GetGame().GetDataCollector().GetPlayerData(killerId);
 
-		FactionAffiliationComponent victimAffiliation = FactionAffiliationComponent.Cast(AI.FindComponent(FactionAffiliationComponent));
-		if (!victimAffiliation)
+		SCR_FactionManager factionManager = SCR_FactionManager.Cast(GetGame().GetFactionManager());
+		if (!factionManager)
 			return;
-
-		FactionAffiliationComponent killerAffiliation = FactionAffiliationComponent.Cast(killer.FindComponent(FactionAffiliationComponent));
-		if (!killerAffiliation)
+		
+		Faction factionKiller = Faction.Cast(factionManager.GetPlayerFaction(killerId));
+		if (!factionKiller)
 			return;
-
-		Faction victimFaction = victimAffiliation.GetAffiliatedFaction();
-		Faction killerFaction = killerAffiliation.GetAffiliatedFaction();
 
 		//Add an AI kill. Find if friendly or unfriendly
-		if (killerFaction && victimFaction)
-		{
-			if (killerFaction.IsFactionFriendly(victimFaction))
-				killerData.AddStat(SCR_EDataStats.FRIENDLY_AI_ROADKILLS);
-			else
-				killerData.AddStat(SCR_EDataStats.AI_ROADKILLS);
-		}
+		if (factionKiller.IsFactionFriendly(AIEntityChar.GetFaction()))
+			killerData.AddStat(SCR_EDataStats.FRIENDLY_AI_ROADKILLS);
+		else
+			killerData.AddStat(SCR_EDataStats.AI_ROADKILLS);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -289,14 +281,18 @@ TODO: REMOVE THIS, REPLACE WITH SENDING THROUGH RPL THE STATS FROM THE SERVER RE
 
 		if (m_fTimeSinceUpdate < m_fUpdatePeriod)
 			return;
-
-		for (int i = 0, count = m_mTrackedPlayersInVehicles.Count(); i < count; i++)
+		
+		//Changed from for to foreach to avoid out of bounds exception
+		array<int> playerIDsToRemove = {};
+		foreach (int playerId, SCR_DataCollectorDriverModuleContext playerContext: m_mTrackedPlayersInVehicles)
 		{
-			SCR_DataCollectorDriverModuleContext playerContext = m_mTrackedPlayersInVehicles.GetElement(i);
 			if (!playerContext.m_Player || !playerContext.m_Vehicle)
 			{
-				Print("DataCollectorDriverModule:Update: this context's player or vehicle is null. Removing it from the list", LogLevel.WARNING);
-				m_mTrackedPlayersInVehicles.RemoveElement(i);
+				Print("DataCollectorDriverModule:Update: this context's player or vehicle is null. Player ID: " + playerId + ". Seems wrong", LogLevel.WARNING);
+				
+				if (!playerIDsToRemove.Contains(playerId))
+					playerIDsToRemove.Insert(playerId);
+				
 				continue;
 			}
 
@@ -314,7 +310,7 @@ TODO: REMOVE THIS, REPLACE WITH SENDING THROUGH RPL THE STATS FROM THE SERVER RE
 			if (distanceTraveled < 1)
 				continue;
 
-			SCR_PlayerData playerData = GetGame().GetDataCollector().GetPlayerData(m_mTrackedPlayersInVehicles.GetKey(i));
+			SCR_PlayerData playerData = GetGame().GetDataCollector().GetPlayerData(playerId);
 
 			//If player is driver we give some points, if not we give others
 			if (playerContext.m_bPilot)
@@ -357,6 +353,12 @@ TODO: REMOVE THIS, REPLACE WITH SENDING THROUGH RPL THE STATS FROM THE SERVER RE
 			}
 #endif
 		}
+		
+		foreach (int playerIdToRemove : playerIDsToRemove)
+		{
+			m_mTrackedPlayersInVehicles.Remove(playerIdToRemove);
+		}
+		
 		m_fTimeSinceUpdate = 0;
 	}
 

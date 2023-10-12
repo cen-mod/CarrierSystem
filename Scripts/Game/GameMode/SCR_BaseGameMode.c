@@ -103,7 +103,7 @@ Important:
 void SCR_BaseGameMode_OnPlayerDisconnected(int playerId, KickCauseCode cause = KickCauseCode.NONE, int timeout = -1);
 typedef func SCR_BaseGameMode_OnPlayerDisconnected;
 
-void SCR_BaseGameMode_OnPlayerKilled(int playerId, IEntity player, IEntity killer);
+void SCR_BaseGameMode_OnPlayerKilled(int playerId, IEntity playerEntity, IEntity killerEntity, notnull Instigator killer);
 typedef func SCR_BaseGameMode_OnPlayerKilled;
 
 //~ Generic Event that sends over player ID
@@ -172,7 +172,7 @@ class SCR_BaseGameMode : BaseGameMode
 	[Attribute("1", uiwidget: UIWidgets.CheckBox, "When true, allows players to freely swap their faction after initial assignment.", category: WB_GAME_MODE_CATEGORY)]
 	protected bool m_bAllowFactionChange;
 	
-	[Attribute("0", UIWidgets.Slider, params: "0 300 0.1", desc: "Time in seconds after which session is restarted upon completion or 0 if none.", category: WB_GAME_MODE_CATEGORY)]
+	[Attribute("30", UIWidgets.Slider, params: "0 600 1", desc: "Time in seconds after which the mission is reloaded upon completion or 0 to disable it.", category: WB_GAME_MODE_CATEGORY)]
 	private float m_fAutoReloadTime;
 	
 	//-----------------------------------------
@@ -207,6 +207,10 @@ class SCR_BaseGameMode : BaseGameMode
 
 	//! Last timestamp of sent time correction for the server.
 	protected float m_fLastTimeCorrection;
+	
+	//! Is the session hosted by a player?
+	[RplProp()]
+	protected bool m_bIsHosted;
 
 	//-----------------------------------------
 	//
@@ -236,9 +240,10 @@ class SCR_BaseGameMode : BaseGameMode
 	protected ref SCR_SpawnPreload m_SpawnPreload;
 	protected ref OnPreloadFinishedInvoker m_OnPreloadFinished;
 
-	bool IsSpawnPreloadEnabled()
+	bool CanStartSpawnPreload()
 	{
-		return m_bUseSpawnPreload;
+		ChimeraWorld world = GetGame().GetWorld();
+		return (!world.IsGameTimePaused() && m_bUseSpawnPreload);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -310,6 +315,15 @@ class SCR_BaseGameMode : BaseGameMode
 			time = 0;
 
 		return time;
+	}
+	
+	//------------------------------------------------------------------------------------------------
+	/*!
+		\return True if the game is hosted by a player (i.e., not dedicated server)
+	*/
+	bool IsHosted()
+	{
+		return m_bIsHosted;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -591,46 +605,24 @@ class SCR_BaseGameMode : BaseGameMode
 		#endif
 		
 		// Automatically restart the session on game mode end if enabled
-		if (IsAutoReload())
-		{
-			float delay = GetAutoReloadDelay();
-			GetGame().GetCallqueue().CallLater(RestartSession, delay * 1000.0, false);
-		}
+		float reloadTime = GetAutoReloadDelay();
+		if (reloadTime > 0)
+			GetGame().GetCallqueue().CallLater(RestartSession, reloadTime * 1000.0, false);	
 	}
-	
+
 	/*!
-		Returns delay of restart (if enabled) in seconds.
+		Returns delay of mission reload (if enabled) in seconds or else 0 if disabled.
 	*/
 	protected float GetAutoReloadDelay()
 	{
-		if (System.IsCLIParam("autoreload"))
-		{
-			string sdur;
-			if (System.GetCLIParam("autoreload", sdur))
-			{
-				float fdur = sdur.ToFloat();
-				if (fdur > 0.0)
-					return fdur;
-			}
-		}
-		
+		// Allow the server owner to override it via -autoReload=TIME
+		string autoReloadTimeString;
+		if (System.GetCLIParam("autoreload", autoReloadTimeString))
+			return Math.Clamp(autoReloadTimeString.ToFloat(), 0.0, 600.0);
+
 		return m_fAutoReloadTime;
 	}
-	
-	/*!
-		Returns true if session should automatically be restarted when finished.
-	*/
-	protected bool IsAutoReload()
-	{
-		if (m_fAutoReloadTime > 0.0)
-			return true;
-		
-		if (System.IsCLIParam("autoreload"))
-			return true;
-		
-		return false;
-	}
-	
+
 	/*!
 		Reloads current session (authority only).
 	*/
@@ -639,10 +631,10 @@ class SCR_BaseGameMode : BaseGameMode
 		if (!IsMaster())
 			return;
 		
-		Print("SCR_BaseGameMode::RestartSession()", LogLevel.DEBUG);
-		if (GameStateTransitions.RequestServerReload())
+		Print("SCR_BaseGameMode::RequestScenarioRestart()", LogLevel.DEBUG);
+		if (GameStateTransitions.RequestScenarioRestart())
 		{
-			Print("SCR_BaseGameMode::RestartSession() successfull server reload requested!", LogLevel.DEBUG);
+			Print("SCR_BaseGameMode::RequestScenarioRestart() successfull server reload requested!", LogLevel.DEBUG);
 		}
 	}
 
@@ -742,6 +734,12 @@ class SCR_BaseGameMode : BaseGameMode
 	*/
 	override void OnPlayerConnected(int playerId)
 	{
+		if (!m_bIsHosted)
+		{
+			m_bIsHosted = GetGame().GetPlayerManager().GetPlayerController(playerId).GetRplIdentity() == RplIdentity.Local();
+			Replication.BumpMe();
+		}
+		
 		super.OnPlayerConnected(playerId);
 		m_OnPlayerConnected.Invoke(playerId);
 		
@@ -841,7 +839,7 @@ class SCR_BaseGameMode : BaseGameMode
 				}
 				
 				//------------------------------------------------------------------------------------------------
-				//!	MCS hard override: Clean up later since otherwise the carried player gets deleted as well...
+				//!	CEN hard override: Clean up later since otherwise the carried player gets deleted as well...
 				GetGame().GetCallqueue().CallLater(SCR_EntityHelper.DeleteEntityAndChildren, 1000, false, controlledEntity);
 				//------------------------------------------------------------------------------------------------
 			}
@@ -901,15 +899,15 @@ class SCR_BaseGameMode : BaseGameMode
 	}
 	
 	//------------------------------------------------------------------------------------------------
-	protected override bool HandlePlayerKilled(int playerId, IEntity player, IEntity killer)
-	{
+	protected override bool HandlePlayerKilled(int playerId, IEntity playerEntity, IEntity killerEntity, notnull Instigator killer)
+	{		
 		foreach (SCR_BaseGameModeComponent comp : m_aAdditionalGamemodeComponents)
 		{
 			// First component that returns false overrides the behaviour and can handle
 			// the kill based on their respective needs
-			if (!comp.HandlePlayerKilled(playerId, player, killer))
+			if (!comp.HandlePlayerKilled(playerId, playerEntity, killerEntity, killer))
 			{
-				OnPlayerKilledHandled(playerId, player, killer);
+				OnPlayerKilledHandled(playerId, playerEntity, killerEntity, killer);
 				return false;
 			}
 		}
@@ -920,34 +918,35 @@ class SCR_BaseGameMode : BaseGameMode
 	
 	//------------------------------------------------------------------------------------------------
 	//! Default player kill behaviour. Called when a player is killed (and HandlePlayerKilled returns true).
-	protected override void OnPlayerKilled(int playerId, IEntity player, IEntity killer)
+	protected override void OnPlayerKilled(int playerId, IEntity playerEntity, IEntity killerEntity, notnull Instigator killer)
 	{
-		super.OnPlayerKilled(playerId, player, killer);
-		m_OnPlayerKilled.Invoke(playerId, player, killer);
+		super.OnPlayerKilled(playerId, playerEntity, killerEntity, killer);
+		
+		m_OnPlayerKilled.Invoke(playerId, playerEntity, killerEntity, killer);
 		
 		// RespawnSystemComponent is not a SCR_BaseGameModeComponent, so for now we have to
 		// propagate these events manually. 
 		if (IsMaster())
-			m_pRespawnSystemComponent.OnPlayerKilled_S(playerId, player, killer);
+			m_pRespawnSystemComponent.OnPlayerKilled_S(playerId, playerEntity, killerEntity, killer);
 
 		// Dispatch events to children components
 		foreach (SCR_BaseGameModeComponent comp : m_aAdditionalGamemodeComponents)
 		{
-			comp.OnPlayerKilled(playerId, player, killer);
+			comp.OnPlayerKilled(playerId, playerEntity, killerEntity, killer);
 		}
 
 		#ifdef GMSTATS
 		if (IsGameModeStatisticsEnabled())
-			SCR_GameModeStatistics.RecordDeath(player, killer);
+			SCR_GameModeStatistics.RecordDeath(playerId, playerEntity, killerEntity, killer);
 		#endif
 	}
 	
 	//------------------------------------------------------------------------------------------------
 	//! Called after player kill behaviour is handled by a component overriding the generic logic.
-	protected void OnPlayerKilledHandled(int playerId, IEntity player, IEntity killer)
+	protected void OnPlayerKilledHandled(int playerId, IEntity playerEntity, IEntity killerEntity, notnull Instigator killer)
 	{
 		foreach (SCR_BaseGameModeComponent comp : m_aAdditionalGamemodeComponents)
-			comp.OnPlayerKilledHandled(playerId, player, killer);
+			comp.OnPlayerKilledHandled(playerId, playerEntity, killerEntity, killer);
 	}
 	
 	//------------------------------------------------------------------------------------------------
@@ -1016,36 +1015,24 @@ class SCR_BaseGameMode : BaseGameMode
 		{
 			comp.OnControllableSpawned(entity);
 		}
-
-		ChimeraCharacter character = ChimeraCharacter.Cast(entity);
-		if (character)
-			HandleOnCharacterCreated(character);
 	}
 
 	//------------------------------------------------------------------------------------------------
 	/*
 		When a controllable entity is destroyed, this event is raised.
 		\param entity Destroyed entity that raised this event
-		\param instigator Instigator entity that destroyed our victim
+		\param killerEntity Entity that killed the entity (can be null)
+		\param killer Instigator entity that destroyed our victim
 	*/
-	protected override void OnControllableDestroyed(IEntity entity, IEntity instigator)
+	protected override void OnControllableDestroyed(IEntity entity, IEntity killerEntity, notnull Instigator instigator)
 	{
-		super.OnControllableDestroyed(entity, instigator);
-		m_OnControllableDestroyed.Invoke(entity, instigator);
+		super.OnControllableDestroyed(entity, killerEntity, instigator);
+		m_OnControllableDestroyed.Invoke(entity, killerEntity, instigator);
 
 		foreach (SCR_BaseGameModeComponent comp : m_aAdditionalGamemodeComponents)
 		{
-			comp.OnControllableDestroyed(entity, instigator);	
+			comp.OnControllableDestroyed(entity, killerEntity, instigator);	
 		}
-
-		ChimeraCharacter character = ChimeraCharacter.Cast(entity);
-		if (character)
-			HandleOnCharacterDeath(character.GetCharacterController(), instigator);
-
-		//--- If the entity is player, call OnPlayerKilled (only when it wasn't player to begin with, in which case OnPlayerKilled is called by game code)
-		int playerID = GetGame().GetPlayerManager().GetPlayerIdFromControlledEntity(entity);
-		//if (HandlePlayerKilled(playerID, entity, instigator))
-		//	OnPlayerKilled(playerID, entity, instigator);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1189,9 +1176,10 @@ class SCR_BaseGameMode : BaseGameMode
 			\param requestComponent The player request component instigating this spawn.
 			\param handlerComponent The spawn handler component handling this spawn.
 			\param data The request payload.
+			\param[out] result Reason why respawn is disabled. Note that if returns true the reason will always be OK
 			\return True when spawn is allowed, false otherwise. 
 	*/
-	bool CanPlayerSpawn_S(SCR_SpawnRequestComponent requestComponent, SCR_SpawnHandlerComponent handlerComponent, SCR_SpawnData data)
+	bool CanPlayerSpawn_S(SCR_SpawnRequestComponent requestComponent, SCR_SpawnHandlerComponent handlerComponent, SCR_SpawnData data, out SCR_ESpawnResult result = SCR_ESpawnResult.SPAWN_NOT_ALLOWED)
 	{
 		if (m_RespawnTimerComponent) 
 		{
@@ -1199,9 +1187,16 @@ class SCR_BaseGameMode : BaseGameMode
 			
 			// If player has not been enqueued yet, ignore the spawn timer
 			if (m_RespawnTimerComponent.IsPlayerEnqueued(playerId))
-				return m_RespawnTimerComponent.GetCanPlayerSpawn(playerId);
+			{
+				if (!m_RespawnTimerComponent.GetCanPlayerSpawn(playerId))
+				{
+					result = SCR_ESpawnResult.NOT_ALLOWED_TIMER;
+					return false;
+				}
+			}
 		}
 		
+		result = SCR_ESpawnResult.OK;
 		return true;
 	}
 
@@ -1420,11 +1415,15 @@ class SCR_BaseGameMode : BaseGameMode
 				DbgUI.Spacer(16);
 				DbgUI.Text("Authority details:");
 				
-				string autoReload = string.Format("Auto reload: %1", IsAutoReload());
-				DbgUI.Text(autoReload);
-				
-				string autoReloadDuration = string.Format("Auto reload duration: %1 s", GetAutoReloadDelay());
-				DbgUI.Text(autoReloadDuration);
+				float autoReloadDelay = GetAutoReloadDelay();
+				if (autoReloadDelay > 0)
+				{
+					DbgUI.Text(string.Format("Auto reload: %1 seconds.", autoReloadDelay));
+				}
+				else
+				{
+					DbgUI.Text("Auto reload: Disabled.");
+				}
 				
 				DbgUI.Spacer(16);
 				
@@ -1766,31 +1765,6 @@ class SCR_BaseGameMode : BaseGameMode
 			SCR_GameModeStatistics.StopRecording();
 		#endif
 	}
-	
-	//------------------------------------------------------------------------------------------------
-	[Obsolete()]
-	void HandleOnLoadoutAssigned(int playerID, SCR_BasePlayerLoadout assignedLoadout);
-	//------------------------------------------------------------------------------------------------
-	[Obsolete()]
-	void HandleOnFactionAssigned(int playerID, Faction assignedFaction);
-	//------------------------------------------------------------------------------------------------
-	[Obsolete()]
-	void HandleOnSpawnPointAssigned(int playerID, SCR_SpawnPoint spawnPoint);
-	//------------------------------------------------------------------------------------------------
-	[Obsolete("Use SCR_BaseGameMode.CanPlayerSpawn_S instead!")];
-	bool CanPlayerRespawn(int playerID);
-	//------------------------------------------------------------------------------------------------
-	[Obsolete("Don't use this at all!")]
-	void RequestPlayerRespawnSelection();
-	//------------------------------------------------------------------------------------------------
-	[Obsolete("Use SCR_BaseGameMode.OnPlayerSpawnOnPoint_S instead!")];
-	void OnSpawnPointUsed(SCR_SpawnPoint spawnPoint, int playerId);
-	//------------------------------------------------------------------------------------------------
-	[Obsolete("Use OnControllableSpawned instead")]
-	void HandleOnCharacterCreated(ChimeraCharacter character);
-	//------------------------------------------------------------------------------------------------
-	[Obsolete("Use OnControllableDestroyed instead")]
-	void HandleOnCharacterDeath(notnull CharacterControllerComponent characterController, IEntity instigator);
 
 	#ifdef GMSTATS
 	//! Should gamemode diagnostic statistics be enabled?
