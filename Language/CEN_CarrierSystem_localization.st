@@ -8,6 +8,15 @@ StringTable {
    Author "kexanone"
    LastChanged "kexanone"
   }
+  CustomStringTableItem "{5E3499FA6523CB4D}" {
+   Id "CEN_CarrierSystem-UserAction_AddCasualty"
+   Target_en_us "Add casualty"
+   Target_fr_fr "Déposer blessé"
+   Target_de_de "Kampfunfähigen platzieren"
+   Modified 1580513013
+   Author "swellig"
+   LastChanged "swellig"
+  }
   CustomStringTableItem "{5DDEFB51C773DDD9}" {
    Id "CEN_CarrierSystem-UserAction_Carry"
    Target_en_us "Carry"
@@ -31,9 +40,9 @@ StringTable {
    Target_en_us "Release"
    Target_fr_fr "Déposer"
    Target_de_de "Ablegen"
-   Modified 1578028452
-   Author "kexanone"
-   LastChanged "kexanone"
+   Modified 1580512463
+   Author "swellig"
+   LastChanged "swellig"
   }
  }
 }
