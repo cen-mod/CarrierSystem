@@ -1,7 +1,10 @@
+//------------------------------------------------------------------------------------------------
 class CEN_CarrierSystem_HelperClass : GenericEntityClass
 {
-};
+}
 
+//------------------------------------------------------------------------------------------------
+//! Helper compartment entity that dynamically gets created/deleted and attached/detached to carriers
 class CEN_CarrierSystem_Helper : GenericEntity
 {
 	protected IEntity m_eCarrier = null;
@@ -14,6 +17,10 @@ class CEN_CarrierSystem_Helper : GenericEntity
 	private static const float PRONE_CHECK_TIMEOUT = 100; // ms
 	private static const float CLEANUP_TIMEOUT = 1000; // ms
 	
+	//------------------------------------------------------------------------------------------------
+	//! Start <carrier> to carry the specified <carried>
+	//! Creates an instance of the helper compartment, attaches it to the <carrier> and moves the <carried>
+	//! in the compartment
 	static void Carry(IEntity carrier, IEntity carried)
 	{
 		CEN_CarrierSystem_Helper helper = CEN_CarrierSystem_Helper.Cast(GetGame().SpawnEntityPrefab(Resource.Load(HELPER_PREFAB_NAME), null, EntitySpawnParams()));
@@ -37,6 +44,11 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		compartmentAccessComponent.MoveInVehicle(helper, ECompartmentType.Cargo);
 	}
 
+	//------------------------------------------------------------------------------------------------
+	//! Called on carrier's machine
+	//! - Add release action keybind
+	//! - Disable physcial interaction between carrier and carried player
+	//! - Add prone prevention handling
 	[RplRpc(RplChannel.Reliable, RplRcver.Owner)]
 	protected void RpcDo_Owner_Carry(RplId carriedId)
 	{
@@ -54,12 +66,17 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		GetGame().GetCallqueue().CallLater(PreventProneCarrier, PRONE_CHECK_TIMEOUT, true);
 	}
 	
+	//------------------------------------------------------------------------------------------------
+	//! Resets the stance if player attempts to go prone
 	protected void PreventProneCarrier()
 	{
 		if (m_CarrierCharCtrl.GetStance() == ECharacterStance.PRONE)
 			m_CarrierCharCtrl.SetStanceChange(ECharacterStanceChange.STANCECHANGE_TOCROUCH);
 	}
 
+	//------------------------------------------------------------------------------------------------
+	//! Release the carried player by passing the carrier
+	//! Calls Release method on helper compartment entity
 	static void ReleaseFromCarrier(IEntity carrier)
 	{
 		CEN_CarrierSystem_Helper helper = GetHelperFromCarrier(carrier);
@@ -70,6 +87,9 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		helper.Release();
 	}
 
+	//------------------------------------------------------------------------------------------------
+	//! Release the carried player
+	//! Calls Release method on helper compartment entity
 	static void ReleaseCarried(IEntity carried)
 	{
 		CEN_CarrierSystem_Helper helper = GetHelperFromCarried(carried);
@@ -80,6 +100,10 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		helper.Release();
 	}
 	
+	//------------------------------------------------------------------------------------------------
+	//! Release method for the helper compartment entity
+	//! Moves out carried player and schedules clean up
+	[RplRpc(RplChannel.Reliable, RplRcver.Server)]
 	void Release()
 	{
 		SCR_CompartmentAccessComponent compartmentAccessComponent = SCR_CompartmentAccessComponent.Cast(m_eCarried.FindComponent(SCR_CompartmentAccessComponent));
@@ -91,19 +115,38 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		m_eCarrier.GetTransform(target_transform);
 		SCR_WorldTools.FindEmptyTerrainPosition(target_pos, target_transform[3] + target_transform[2], SEARCH_POS_RADIUS);
 		target_transform[3] = target_pos;
-		compartmentAccessComponent.MoveOutVehicle(-1, target_transform);		
-		
-		RplId carriedId = RplComponent.Cast(m_eCarried.FindComponent(RplComponent)).Id();
-		Rpc(RpcDo_Owner_Release, carriedId);
-		m_eCarrier = null;
-		m_eCarried = null;
+		compartmentAccessComponent.MoveOutVehicle(-1, target_transform);
 		m_bMarkedForDeletion = true;
 		// Clean up later since otherwise the carried player gets deleted as well...
-		GetGame().GetCallqueue().CallLater(SCR_EntityHelper.DeleteEntityAndChildren, CLEANUP_TIMEOUT, false, this);
+		GetGame().GetCallqueue().CallLater(CleanUp, CLEANUP_TIMEOUT, false);
 	}
 	
+	//------------------------------------------------------------------------------------------------
+	//! Delete the helper once the carried player has left the compartment
+	protected void CleanUp()
+	{
+		SCR_BaseCompartmentManagerComponent compartmentManager = SCR_BaseCompartmentManagerComponent.Cast(FindComponent(SCR_BaseCompartmentManagerComponent));
+		array<IEntity> occupants = {};
+		compartmentManager.GetOccupants(occupants);
+		
+		if (!occupants.IsEmpty())
+		{
+			GetGame().GetCallqueue().CallLater(CleanUp, CLEANUP_TIMEOUT, false);
+			return;
+		}
+		
+		RplId carriedId = RplComponent.Cast(m_eCarried.FindComponent(RplComponent)).Id();
+		Rpc(RpcDo_Owner_CleanUp, carriedId);
+		SCR_EntityHelper.DeleteEntityAndChildren(this);
+	}
+	
+	//------------------------------------------------------------------------------------------------
+	//! Clean-up on the carrier
+	//! - Remove release keybinds
+	//! - Enable physical interaction between carrier and carried player
+	//! - Remove prone prevention handling
 	[RplRpc(RplChannel.Reliable, RplRcver.Owner)]
-	protected void RpcDo_Owner_Release(RplId carriedId)
+	protected void RpcDo_Owner_CleanUp(RplId carriedId)
 	{
 		GetGame().GetInputManager().RemoveActionListener("CEN_CarrierSystem_Release", EActionTrigger.DOWN, ActionReleaseCallback);
 		IEntity carried = RplComponent.Cast(Replication.FindItem(carriedId)).GetEntity();
@@ -111,27 +154,29 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		GetGame().GetCallqueue().Remove(PreventProneCarrier);
 	}
 	
+	//------------------------------------------------------------------------------------------------
+	//! Callback for the release keybind
 	protected void ActionReleaseCallback()
 	{
-		Rpc(ActionReleaseServer);
+		Rpc(Release);
 	}
 	
-	[RplRpc(RplChannel.Reliable, RplRcver.Server)]
-	protected void ActionReleaseServer()
-	{
-		Release();
-	}
-	
+	//------------------------------------------------------------------------------------------------
+	//! True if the given player is currently a carrier
 	static bool IsCarrier(IEntity carrier)
 	{
 		return GetHelperFromCarrier(carrier);
 	}
 	
+	//------------------------------------------------------------------------------------------------
+	//! True if the given player is currently carried by another player
 	static bool IsCarried(IEntity carried)
 	{
 		return GetHelperFromCarried(carried);
 	}
 
+	//------------------------------------------------------------------------------------------------
+	//! Get the player that is carried by the given carrier
 	static IEntity GetCarried(IEntity carrier)
 	{
 		CEN_CarrierSystem_Helper helper = GetHelperFromCarrier(carrier);
@@ -141,6 +186,8 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		return helper.m_eCarried;
 	}
 	
+	//------------------------------------------------------------------------------------------------
+	//! Get the carrier that carries the given player
 	static IEntity GetCarrier(IEntity carried)
 	{
 		CEN_CarrierSystem_Helper helper = GetHelperFromCarried(carried);
@@ -150,6 +197,8 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		return helper.m_eCarrier;
 	}
 
+	//------------------------------------------------------------------------------------------------
+	//! Get the instance of the helper compartment entity for the given carrier
 	protected static CEN_CarrierSystem_Helper GetHelperFromCarrier(IEntity carrier)
 	{
 		CEN_CarrierSystem_Helper helper = null;
@@ -171,6 +220,8 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		return helper;
 	}
 
+	//------------------------------------------------------------------------------------------------
+	//! Get the instance of the helper compartment entity for the given carried player
 	protected static CEN_CarrierSystem_Helper GetHelperFromCarried(IEntity carried)
 	{
 		CEN_CarrierSystem_Helper helper = CEN_CarrierSystem_Helper.Cast(carried.GetParent());
