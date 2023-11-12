@@ -5,7 +5,7 @@ SCR_ChimeraCharacter {
    additionalActions {
     CEN_CarrierSystem_CarryUserAction "{5DDEFB529A8EBB97}" {
      ParentContextList {
-      "Chest"
+      "LowerTorso"
      }
      UIInfo UIInfo "{5DDEFB52A5D867D8}" {
       Name "#CEN_CarrierSystem-UserAction_Carry"
