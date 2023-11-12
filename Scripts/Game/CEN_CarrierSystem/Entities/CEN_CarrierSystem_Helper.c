@@ -133,10 +133,14 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		{
 			GetGame().GetCallqueue().CallLater(CleanUp, CLEANUP_TIMEOUT, false);
 			return;
-		}
+		};
 		
-		RplId carriedId = RplComponent.Cast(m_eCarried.FindComponent(RplComponent)).Id();
+		RplComponent carriedRpl =  RplComponent.Cast(m_eCarried.FindComponent(RplComponent));
+		RplId carriedId = carriedRpl.Id();
 		Rpc(RpcDo_Owner_CleanUp, carriedId);
+		vector carrierTransform[4];
+		m_eCarrier.GetWorldTransform(carrierTransform);
+		carriedRpl.ForceNodeMovement(carrierTransform);
 		SCR_EntityHelper.DeleteEntityAndChildren(this);
 	}
 	
