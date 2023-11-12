@@ -1,5 +1,8 @@
+//------------------------------------------------------------------------------------------------
 modded class SCR_BaseGameMode : BaseGameMode
 {
+	//------------------------------------------------------------------------------------------------
+	//! Release carried player if they are killed or the carrier is killed
 	protected override void OnPlayerKilled(int playerId, IEntity playerEntity, IEntity killerEntity, notnull Instigator killer)
 	{
 		CEN_CarrierSystem_Helper.ReleaseFromCarrier(playerEntity);
@@ -7,6 +10,8 @@ modded class SCR_BaseGameMode : BaseGameMode
 		super.OnPlayerKilled(playerId, playerEntity, killerEntity, killer);
 	};
 	
+	//------------------------------------------------------------------------------------------------
+	//! Release carried player if they disconnected or the carrier disconnected
 	protected override void OnPlayerDisconnected(int playerId, KickCauseCode cause, int timeout)
 	{
 		IEntity player = GetGame().GetPlayerManager().GetPlayerControlledEntity(playerId);
