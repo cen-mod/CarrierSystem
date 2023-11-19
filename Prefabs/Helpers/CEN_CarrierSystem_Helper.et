@@ -10,7 +10,14 @@ CEN_CarrierSystem_Helper : "{278E487E19D82680}Prefabs/Vehicles/Core/Vehicle_Carg
      PassengerPositionInfo EntitySlotInfo s1 {
       Offset -0.1 -0.6 0.05
      }
+     ForcedFreeLook 1
      SeatType 1
+     DoorInfoList {
+      CompartmentDoorInfo "{5ED710990552D132}" {
+       EntryPositionInfo PointInfo "{5ED71099005CE831}" {
+       }
+      }
+     }
      CanOccupantEquipGadget 0
     }
    }

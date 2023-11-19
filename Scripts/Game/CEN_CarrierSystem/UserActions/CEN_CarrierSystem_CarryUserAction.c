@@ -1,5 +1,7 @@
+//------------------------------------------------------------------------------------------------
 class CEN_CarrierSystem_CarryUserAction : ScriptedUserAction
 {
+	//------------------------------------------------------------------------------------------------
 	override bool CanBeShownScript(IEntity user)
 	{
 		ChimeraCharacter ownerChar = ChimeraCharacter.Cast(GetOwner());
@@ -13,6 +15,7 @@ class CEN_CarrierSystem_CarryUserAction : ScriptedUserAction
 		return true;
 	}
 	
+	//------------------------------------------------------------------------------------------------
 	override bool CanBePerformedScript(IEntity user)
 	{
 		ChimeraCharacter userChar = ChimeraCharacter.Cast(user);
@@ -37,10 +40,13 @@ class CEN_CarrierSystem_CarryUserAction : ScriptedUserAction
 		return true;
 	}
 	
+	//------------------------------------------------------------------------------------------------
 	override void PerformAction(IEntity pOwnerEntity, IEntity pUserEntity)
 	{
 		CEN_CarrierSystem_Helper.Carry(pUserEntity, pOwnerEntity);
 	}
 	
+	//------------------------------------------------------------------------------------------------
+	//! Methods are executed on the local player
 	override bool CanBroadcastScript() { return false; };
 };

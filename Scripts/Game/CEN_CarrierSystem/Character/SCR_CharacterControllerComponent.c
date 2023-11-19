@@ -1,5 +1,8 @@
+//------------------------------------------------------------------------------------------------
 modded class SCR_CharacterControllerComponent : CharacterControllerComponent
 {
+	//------------------------------------------------------------------------------------------------
+	//! Release carried player if the carrier falls unconscious
 	override protected void OnConsciousnessChanged(bool conscious)
 	{
 		super.OnConsciousnessChanged(conscious);

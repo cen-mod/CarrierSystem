@@ -1,2 +1,4 @@
 *.rdb
-Language/*.conf*
+*.json
+meta
+preview*.jpg
