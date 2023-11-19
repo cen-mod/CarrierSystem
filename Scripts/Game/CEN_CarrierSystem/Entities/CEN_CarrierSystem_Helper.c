@@ -205,7 +205,10 @@ class CEN_CarrierSystem_Helper : GenericEntity
 	//! Get the instance of the helper compartment entity for the given carrier
 	protected static CEN_CarrierSystem_Helper GetHelperFromCarrier(IEntity carrier)
 	{
-		CEN_CarrierSystem_Helper helper = null;
+		if (!carrier)
+			return null;
+		
+		CEN_CarrierSystem_Helper helper;
 		IEntity child = carrier.GetChildren();
 		
 		while (child)
@@ -228,6 +231,9 @@ class CEN_CarrierSystem_Helper : GenericEntity
 	//! Get the instance of the helper compartment entity for the given carried player
 	protected static CEN_CarrierSystem_Helper GetHelperFromCarried(IEntity carried)
 	{
+		if (!carried)
+			return null;
+		
 		CEN_CarrierSystem_Helper helper = CEN_CarrierSystem_Helper.Cast(carried.GetParent());
 		
 		if (!helper || helper.m_bMarkedForDeletion)
