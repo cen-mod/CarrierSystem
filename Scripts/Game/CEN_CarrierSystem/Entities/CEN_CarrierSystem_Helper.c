@@ -27,7 +27,7 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		helper.m_eCarrier = carrier;
 		helper.m_eCarried = carried;
 						
-		carrier.AddChild(helper, carrier.GetBoneIndex("Spine5"));
+		carrier.AddChild(helper, carrier.GetAnimation().GetBoneIndex("Spine5"));
 		
 		SCR_CompartmentAccessComponent compartmentAccessComponent = SCR_CompartmentAccessComponent.Cast(carried.FindComponent(SCR_CompartmentAccessComponent));
 		if (!compartmentAccessComponent)
@@ -102,10 +102,23 @@ class CEN_CarrierSystem_Helper : GenericEntity
 	
 	//------------------------------------------------------------------------------------------------
 	//! Release method for the helper compartment entity
-	//! Moves out carried player and schedules clean up
+	//! Moves out the carried player and schedules clean up
 	[RplRpc(RplChannel.Reliable, RplRcver.Server)]
 	void Release()
 	{
+		MoveOutCarried();
+		// Clean up later since otherwise the carried player gets deleted as well...
+		GetGame().GetCallqueue().CallLater(CleanUp, CLEANUP_TIMEOUT, false);
+		m_bMarkedForDeletion = true;
+	}
+	
+	//------------------------------------------------------------------------------------------------
+	//! Moves the carried player out of the helper compartment
+	protected void MoveOutCarried()
+	{
+		if (!m_eCarried)
+			return;
+		
 		SCR_CompartmentAccessComponent compartmentAccessComponent = SCR_CompartmentAccessComponent.Cast(m_eCarried.FindComponent(SCR_CompartmentAccessComponent));
 		if (!compartmentAccessComponent)
 			return;
@@ -113,12 +126,10 @@ class CEN_CarrierSystem_Helper : GenericEntity
 		vector target_pos;
 		vector target_transform[4];
 		m_eCarrier.GetTransform(target_transform);
+		// target_transform[2] is vectorDir in Arma 3
 		SCR_WorldTools.FindEmptyTerrainPosition(target_pos, target_transform[3] + target_transform[2], SEARCH_POS_RADIUS);
 		target_transform[3] = target_pos;
 		compartmentAccessComponent.MoveOutVehicle(-1, target_transform);
-		m_bMarkedForDeletion = true;
-		// Clean up later since otherwise the carried player gets deleted as well...
-		GetGame().GetCallqueue().CallLater(CleanUp, CLEANUP_TIMEOUT, false);
 	}
 	
 	//------------------------------------------------------------------------------------------------
@@ -135,12 +146,19 @@ class CEN_CarrierSystem_Helper : GenericEntity
 			return;
 		};
 		
-		RplComponent carriedRpl =  RplComponent.Cast(m_eCarried.FindComponent(RplComponent));
-		RplId carriedId = carriedRpl.Id();
+		RplId carriedId = RplId.Invalid();
+		
+		if (m_eCarried)
+		{
+			RplComponent carriedRpl =  RplComponent.Cast(m_eCarried.FindComponent(RplComponent));
+			carriedId = carriedRpl.Id();
+			
+			vector carrierTransform[4];
+			m_eCarrier.GetWorldTransform(carrierTransform);
+			carriedRpl.ForceNodeMovement(carrierTransform);	
+		};
+					
 		Rpc(RpcDo_Owner_CleanUp, carriedId);
-		vector carrierTransform[4];
-		m_eCarrier.GetWorldTransform(carrierTransform);
-		carriedRpl.ForceNodeMovement(carrierTransform);
 		SCR_EntityHelper.DeleteEntityAndChildren(this);
 	}
 	
@@ -153,8 +171,11 @@ class CEN_CarrierSystem_Helper : GenericEntity
 	protected void RpcDo_Owner_CleanUp(RplId carriedId)
 	{
 		GetGame().GetInputManager().RemoveActionListener("CEN_CarrierSystem_Release", EActionTrigger.DOWN, ActionReleaseCallback);
+		
 		IEntity carried = RplComponent.Cast(Replication.FindItem(carriedId)).GetEntity();
-		carried.GetPhysics().SetInteractionLayer(m_iPhysicsLayerPreset);
+		if (carried)
+			carried.GetPhysics().SetInteractionLayer(m_iPhysicsLayerPreset);
+		
 		GetGame().GetCallqueue().Remove(PreventProneCarrier);
 	}
 	
